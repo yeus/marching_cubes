@@ -1,10 +1,21 @@
 #blender interface for marching cube algorithm
 
+
 import mathutils
 import bpy
 vec=mathutils.Vector
 
+import os,sys
+
+from itertools import chain
+
+
+blend_dir = os.path.dirname(bpy.data.filepath)
+if blend_dir not in sys.path:
+   sys.path.append(blend_dir)
+
 import marchingcube_np
+
 
 def genobject(objname,verts=[],faces=[],edges=[]):
     me = bpy.data.meshes.new(objname)  # create a new mesh
@@ -42,3 +53,8 @@ def selectobj(obj):
     bpy.ops.object.select_all(action="DESELECT")
     obj.select=True
     bpy.context.scene.objects.active=obj
+
+
+triangles=marchingcube_np.main()
+
+genobjandremovedoubles(triangles)

@@ -62,19 +62,15 @@ def main():
     #sphere=np.linalg.norm(ord=2)
     
     def scalarfield(pos):
-        m=2 #distance between spheres
-        a= sphere(pos+vec3d(-m,0.0,0.0))
-        b= sphere(pos-vec3d(m,0.0,0.0))
-        #print(a+b)
-        return a+b
+        return (pos[0]**2+pos[1]**2+pos[2]**2)*0.1
       
     #scalarfield=np.vectorize(scalarfield)
 
-    p0=np.array((-5,-5,-5))             #first point defining the gridbox of the MC-algorithm
-    p1=np.array((5,5,5))                #second point defining the gridbox of the MC-algorithm
-    res=15
+    p0=np.array((-5.0,-5.0,-5.0))             #first point defining the gridbox of the MC-algorithm
+    p1=np.array((5.0,5.0,5.0))                #second point defining the gridbox of the MC-algorithm
+    res=20
     resolution=np.array((res,res,res))   #resolution in x,y,z direction of the grid (10x10x10 means 1000 cubes)
-    isolevel=0.3        #threshold value used for the surface within the scalarfield
+    isolevel=1.0        #threshold value used for the surface within the scalarfield
 
 #end of isosurface definition
 ###############################################
