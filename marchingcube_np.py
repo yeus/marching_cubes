@@ -45,11 +45,12 @@ __status__ = "alpha"
 import time
 import math
 from math import sqrt,sin,cos,tan
-import mathutils
-import bpy
+
 from itertools import chain
-vec=mathutils.Vector
-ABS=abs
+import numpy as np
+
+vec3d=lambda x,y,z: np.array((x,y,z), dtype=np.float)
+ABS=np.abs
 
 def main():
     print("start calculation of isosurface")
@@ -57,33 +58,108 @@ def main():
 #change this part to create your own surfaces
 #####################################################    
     # define a 3D scalarfield (the function which defines the shape of the isosurface)
+    sphere=lambda pos: np.linalg.norm(pos,ord=1)
+    #sphere=np.linalg.norm(ord=2)
+    
     def scalarfield(pos):
-        x,y,z=pos[0],pos[1],pos[2]
         m=2 #distance between spheres
-        a= 1.0/(1+(x-m)*(x-m)+y*y+z*z)
-        b= 1.0/(1+(x+m)*(x+m)+y*y+z*z)
-        c= 0.5*(sin(6*x)+sin(6*z))
-        csq=c**10
-        return (a+b)-csq
+        a= sphere(pos+vec3d(-m,0.0,0.0))
+        b= sphere(pos-vec3d(m,0.0,0.0))
+        #print(a+b)
+        return a+b
+      
+    #scalarfield=np.vectorize(scalarfield)
 
-    p0=-5,-5,-5             #first point defining the gridbox of the MC-algorithm
-    p1=5,5,5                #second point defining the gridbox of the MC-algorithm
-    res=20
-    resolution=(res,res,res)   #resolution in x,y,z direction of the grid (10x10x10 means 1000 cubes)
-    isolevel=0.3         #threshold value used for the surface within the scalarfield
+    p0=np.array((-5,-5,-5))             #first point defining the gridbox of the MC-algorithm
+    p1=np.array((5,5,5))                #second point defining the gridbox of the MC-algorithm
+    res=15
+    resolution=np.array((res,res,res))   #resolution in x,y,z direction of the grid (10x10x10 means 1000 cubes)
+    isolevel=0.3        #threshold value used for the surface within the scalarfield
 
 #end of isosurface definition
 ###############################################
 
-    start=time.time()
-    isosurface(p0,p1,resolution,isolevel,scalarfield)
-    print("calculation finished in: {:.3f} s".format(time.time()-start))
+    start=time.time()  #time the algorithm
+    
+    triangles=isosurface(p0,p1,resolution,isolevel,scalarfield)
+    
+    print("calculation finished in: {:.3f} seconds".format(time.time()-start))
 
-    print("end test")  
+    #genobjandremovedoubles(triangles)
+    
+    return triangles
 
+def polygonise(cornervalues,cornerpos,isolevel,edgetable, tritable):
+    #   Determine the index into the edge table which
+    #   tells us which vertices are inside of the surface
+    cubeindex = 0
+    if cornervalues[0] < isolevel: cubeindex = cubeindex | 1
+    if cornervalues[1] < isolevel: cubeindex = cubeindex | 2
+    if cornervalues[2] < isolevel: cubeindex = cubeindex | 4
+    if cornervalues[3] < isolevel: cubeindex = cubeindex | 8
+    if cornervalues[4] < isolevel: cubeindex = cubeindex | 16
+    if cornervalues[5] < isolevel: cubeindex = cubeindex | 32
+    if cornervalues[6] < isolevel: cubeindex = cubeindex | 64
+    if cornervalues[7] < isolevel: cubeindex = cubeindex | 128
+    
+    # Cube is entirely in/out of the surface
+    if edgetable[cubeindex] == 0: return []
+    
+    vertlist=[[]]*12
+    # Find the vertices where the surface intersects the cube
+    if (edgetable[cubeindex] & 1):    vertlist[0]  = vertexinterp(isolevel,cornerpos[0],cornerpos[1],cornervalues[0],cornervalues[1])
+    if (edgetable[cubeindex] & 2):    vertlist[1]  = vertexinterp(isolevel,cornerpos[1],cornerpos[2],cornervalues[1],cornervalues[2])
+    if (edgetable[cubeindex] & 4):    vertlist[2]  = vertexinterp(isolevel,cornerpos[2],cornerpos[3],cornervalues[2],cornervalues[3])
+    if (edgetable[cubeindex] & 8):    vertlist[3]  = vertexinterp(isolevel,cornerpos[3],cornerpos[0],cornervalues[3],cornervalues[0])
+    if (edgetable[cubeindex] & 16):   vertlist[4]  = vertexinterp(isolevel,cornerpos[4],cornerpos[5],cornervalues[4],cornervalues[5])
+    if (edgetable[cubeindex] & 32):   vertlist[5]  = vertexinterp(isolevel,cornerpos[5],cornerpos[6],cornervalues[5],cornervalues[6])
+    if (edgetable[cubeindex] & 64):   vertlist[6]  = vertexinterp(isolevel,cornerpos[6],cornerpos[7],cornervalues[6],cornervalues[7])
+    if (edgetable[cubeindex] & 128):  vertlist[7]  = vertexinterp(isolevel,cornerpos[7],cornerpos[4],cornervalues[7],cornervalues[4])
+    if (edgetable[cubeindex] & 256):  vertlist[8]  = vertexinterp(isolevel,cornerpos[0],cornerpos[4],cornervalues[0],cornervalues[4])
+    if (edgetable[cubeindex] & 512):  vertlist[9]  = vertexinterp(isolevel,cornerpos[1],cornerpos[5],cornervalues[1],cornervalues[5])
+    if (edgetable[cubeindex] & 1024): vertlist[10] = vertexinterp(isolevel,cornerpos[2],cornerpos[6],cornervalues[2],cornervalues[6])
+    if (edgetable[cubeindex] & 2048): vertlist[11] = vertexinterp(isolevel,cornerpos[3],cornerpos[7],cornervalues[3],cornervalues[7])
 
-def polygonise(cornervalues,cornerpos,isolevel):
-    edgetable=(0x0  , 0x109, 0x203, 0x30a, 0x406, 0x50f, 0x605, 0x70c,
+    #Create the triangle
+    triangles = []
+    #for (i=0;triTable[cubeindex][i]!=-1;i+=3) {
+    i=0
+    while tritable[cubeindex][i] != -1:
+        triangles.append([vertlist[tritable[cubeindex][i  ]],
+                                   vertlist[tritable[cubeindex][i+1]],
+                                   vertlist[tritable[cubeindex][i+2]]])
+        i+=3
+        
+    return triangles
+
+def vertexinterp(isolevel,p1,p2,valp1,valp2):
+   if (ABS(isolevel-valp1) < 0.00001):
+      return p1
+   if (ABS(isolevel-valp2) < 0.00001):
+      return p2
+   if (ABS(valp1-valp2) < 0.00001):
+      return p1
+   
+   mu = (isolevel - valp1) / (valp2 - valp1);
+   p= p1 + mu * (p2-p1)
+   
+   return p
+
+def cellloop(p0,p1,r):
+    for z in np.arange(p0[2],p1[2],r[2]):
+     for y in np.arange(p0[1],p1[1],r[1]):
+      for x in np.arange(p0[0],p1[0],r[0]):
+        yield x,y,z        
+    
+def cornerloop(x,y,z):
+    for cz in (0,z):
+     for cy,cx in zip((0,y,y,0),(0,0,x,x)):
+       yield cx,cy,cz
+
+def isosurface(p0,p1,resolution,isolevel,isofunc):
+    r=np.array([(x1-x0)/sw for x0,x1,sw in zip(p0,p1,resolution)])
+    
+    edgetable=np.array((0x0  , 0x109, 0x203, 0x30a, 0x406, 0x50f, 0x605, 0x70c,
                 0x80c, 0x905, 0xa0f, 0xb06, 0xc0a, 0xd03, 0xe09, 0xf00,
                 0x190, 0x99 , 0x393, 0x29a, 0x596, 0x49f, 0x795, 0x69c,
                 0x99c, 0x895, 0xb9f, 0xa96, 0xd9a, 0xc93, 0xf99, 0xe90,
@@ -114,8 +190,8 @@ def polygonise(cornervalues,cornerpos,isolevel):
                 0xe90, 0xf99, 0xc93, 0xd9a, 0xa96, 0xb9f, 0x895, 0x99c,
                 0x69c, 0x795, 0x49f, 0x596, 0x29a, 0x393, 0x99 , 0x190,
                 0xf00, 0xe09, 0xd03, 0xc0a, 0xb06, 0xa0f, 0x905, 0x80c,
-                0x70c, 0x605, 0x50f, 0x406, 0x30a, 0x203, 0x109, 0x0)
-    tritable = [[-1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1],
+                0x70c, 0x605, 0x50f, 0x406, 0x30a, 0x203, 0x109, 0x0))
+    tritable = np.array([[-1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1],
             [0, 8, 3, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1],
             [0, 1, 9, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1],
             [1, 8, 3, 9, 8, 1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1],
@@ -370,137 +446,19 @@ def polygonise(cornervalues,cornerpos,isolevel):
             [1, 3, 8, 9, 1, 8, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1],
             [0, 9, 1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1],
             [0, 3, 8, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1],
-            [-1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1]];
-
-   
-    #   Determine the index into the edge table which
-    #   tells us which vertices are inside of the surface
-    cubeindex = 0
-    if cornervalues[0] < isolevel: cubeindex = cubeindex | 1
-    if cornervalues[1] < isolevel: cubeindex = cubeindex | 2
-    if cornervalues[2] < isolevel: cubeindex = cubeindex | 4
-    if cornervalues[3] < isolevel: cubeindex = cubeindex | 8
-    if cornervalues[4] < isolevel: cubeindex = cubeindex | 16
-    if cornervalues[5] < isolevel: cubeindex = cubeindex | 32
-    if cornervalues[6] < isolevel: cubeindex = cubeindex | 64
-    if cornervalues[7] < isolevel: cubeindex = cubeindex | 128
-    
-    # Cube is entirely in/out of the surface
-    if edgetable[cubeindex] == 0: return []
-    
-    vertlist=[[]]*12
-    # Find the vertices where the surface intersects the cube
-    if (edgetable[cubeindex] & 1):    vertlist[0]  = vertexinterp(isolevel,cornerpos[0],cornerpos[1],cornervalues[0],cornervalues[1])
-    if (edgetable[cubeindex] & 2):    vertlist[1]  = vertexinterp(isolevel,cornerpos[1],cornerpos[2],cornervalues[1],cornervalues[2])
-    if (edgetable[cubeindex] & 4):    vertlist[2]  = vertexinterp(isolevel,cornerpos[2],cornerpos[3],cornervalues[2],cornervalues[3])
-    if (edgetable[cubeindex] & 8):    vertlist[3]  = vertexinterp(isolevel,cornerpos[3],cornerpos[0],cornervalues[3],cornervalues[0])
-    if (edgetable[cubeindex] & 16):   vertlist[4]  = vertexinterp(isolevel,cornerpos[4],cornerpos[5],cornervalues[4],cornervalues[5])
-    if (edgetable[cubeindex] & 32):   vertlist[5]  = vertexinterp(isolevel,cornerpos[5],cornerpos[6],cornervalues[5],cornervalues[6])
-    if (edgetable[cubeindex] & 64):   vertlist[6]  = vertexinterp(isolevel,cornerpos[6],cornerpos[7],cornervalues[6],cornervalues[7])
-    if (edgetable[cubeindex] & 128):  vertlist[7]  = vertexinterp(isolevel,cornerpos[7],cornerpos[4],cornervalues[7],cornervalues[4])
-    if (edgetable[cubeindex] & 256):  vertlist[8]  = vertexinterp(isolevel,cornerpos[0],cornerpos[4],cornervalues[0],cornervalues[4])
-    if (edgetable[cubeindex] & 512):  vertlist[9]  = vertexinterp(isolevel,cornerpos[1],cornerpos[5],cornervalues[1],cornervalues[5])
-    if (edgetable[cubeindex] & 1024): vertlist[10] = vertexinterp(isolevel,cornerpos[2],cornerpos[6],cornervalues[2],cornervalues[6])
-    if (edgetable[cubeindex] & 2048): vertlist[11] = vertexinterp(isolevel,cornerpos[3],cornerpos[7],cornervalues[3],cornervalues[7])
-
-    #Create the triangle
-    triangles = []
-    #for (i=0;triTable[cubeindex][i]!=-1;i+=3) {
-    i=0
-    while tritable[cubeindex][i] != -1:
-        triangles.append([vertlist[tritable[cubeindex][i  ]],
-                                   vertlist[tritable[cubeindex][i+1]],
-                                   vertlist[tritable[cubeindex][i+2]]])
-        i+=3
-        
-    return triangles
-
-def vertexinterp(isolevel,p1,p2,valp1,valp2):
-   if (ABS(isolevel-valp1) < 0.00001):
-      return p1
-   if (ABS(isolevel-valp2) < 0.00001):
-      return p2
-   if (ABS(valp1-valp2) < 0.00001):
-      return p1
-   mu = (isolevel - valp1) / (valp2 - valp1);
-   p=vec([0,0,0])
-   p.x = p1.x + mu * (p2.x - p1.x);
-   p.y = p1.y + mu * (p2.y - p1.y);
-   p.z = p1.z + mu * (p2.z - p1.z);
-
-   return p
-
-def genobject(objname,verts=[],faces=[],edges=[]):
-    me = bpy.data.meshes.new(objname)  # create a new mesh
-    me.from_pydata(verts,edges,faces)
-    me.update()      # update the mesh with the new data
-    ob = bpy.data.objects.new(objname,me) # create a new object
-    ob.data = me          # link the mesh data to the object
-    scene = bpy.context.scene           # get the current scene
-    scene.objects.link(ob)                      # link the object into the scene
-    return ob
-
-def creategeometry(verts):
-    faces=[]
-    faceoffset=0
-    for ver in verts:
-        if len(ver)==4: 
-            faces.append((faceoffset+0,faceoffset+1,faceoffset+2,faceoffset+3))
-            faceoffset+=4
-        elif len(ver)==3:
-            faces.append((faceoffset+0,faceoffset+1,faceoffset+2)) 
-            faceoffset+=3
-    return list(chain.from_iterable(verts)),faces
-
-def genobjandremovedoubles(verts,name="test"):
-    verts,faces=creategeometry(verts)
-    obj=genobject(name,verts,faces)
-    selectobj(obj)
-    bpy.ops.object.editmode_toggle()
-    bpy.ops.mesh.select_all(action='SELECT')
-    bpy.ops.mesh.remove_doubles(threshold=0.1)#TODO: threshold distance in relation to gridsize
-    bpy.ops.object.editmode_toggle()
-    return obj
-
-def selectobj(obj):
-    bpy.ops.object.select_all(action="DESELECT")
-    obj.select=True
-    bpy.context.scene.objects.active=obj
-
-#a threshold function:
-borders=[5,5,5]
-
-def arange(start, stop, step):
-     r = start
-     while r < stop:
-        yield r
-        r += step
-
-def cellloop(p0,p1,r):
-    for z in arange(p0[2],p1[2],r[2]):
-     for y in arange(p0[1],p1[1],r[1]):
-      for x in arange(p0[0],p1[0],r[0]):
-        yield x,y,z        
-    
-def cornerloop(x,y,z):
-    for cz in (0,z):
-     for cy,cx in zip((0,y,y,0),(0,0,x,x)):
-       yield cx,cy,cz
-
-def isosurface(p0,p1,resolution,isolevel,isofunc):
-    r=[(x1-x0)/sw for x0,x1,sw in zip(p0,p1,resolution)]
+            [-1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1]])
     
     triangles=[]   
     for x,y,z in cellloop(p0,p1,r):
        cornervalues=[]
        cornerpos=[]
        for cx,cy,cz in cornerloop(r[0],r[1],r[2]):
-          pos=vec((x+cx,y+cy,z+cz))
+          pos=np.array((cx+x,cy+y,cz+z))
           cornerpos.append(pos)
           cornervalues.append(isofunc(pos))
-       triangles.extend(polygonise(cornervalues,cornerpos,isolevel))
-             
-    genobjandremovedoubles(triangles)
+       triangles.extend(polygonise(cornervalues,cornerpos,isolevel, edgetable, tritable))
+    
+    return triangles
 
 if __name__=="__main__":
     main()
